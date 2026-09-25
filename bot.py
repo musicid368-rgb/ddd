@@ -23,6 +23,7 @@ SEARCH_SOURCE = os.getenv("SEARCH_SOURCE", "scsearch")  # ytsearch | scsearch
 SPOTIFY_ID = os.getenv("SPOTIFY_CLIENT_ID", "")
 SPOTIFY_SECRET = os.getenv("SPOTIFY_CLIENT_SECRET", "")
 YT_API_KEY = os.getenv("YOUTUBE_API_KEY", "")  # ใส่ก็ได้ ไม่ใส่ก็ได้ (เอาไว้ค้น/อ่านชื่อคลิป YouTube ให้แม่น)
+YT_COOKIES = os.getenv("YOUTUBE_COOKIES", "")  # เนื้อไฟล์ cookies.txt (ออปชัน เสี่ยงโดน Google แบนแอคเคาต์ อ่านคำเตือนใน .env.example)
 
 if not TOKEN:
     print("❌ ไม่เจอ DISCORD_TOKEN — ก็อป .env.example เป็น .env ก่อน")
@@ -52,7 +53,21 @@ YDL_OPTS = {
     "source_address": "0.0.0.0",
     "retries": 3,
     "socket_timeout": 15,
+    # ลอง client หลายตัว เวลา YouTube บล็อกตัวใดตัวหนึ่ง
+    "extractor_args": {"youtube": {"player_client": ["android", "web"]}},
 }
+
+# ถ้าใส่ YOUTUBE_COOKIES มา เขียนลงไฟล์ temp ให้ yt-dlp ใช้ (โดนล้างทุกครั้งที่รีบอท แต่เขียนใหม่จาก env ทุกรอบ)
+import tempfile
+COOKIE_PATH = os.path.join(tempfile.gettempdir(), "ytcookies.txt")
+if YT_COOKIES.strip():
+    try:
+        with open(COOKIE_PATH, "w", encoding="utf-8") as f:
+            f.write(YT_COOKIES)
+        YDL_OPTS["cookiefile"] = COOKIE_PATH
+        print("🍪 ใช้ YouTube cookies (โหมดเสียงจริง)")
+    except Exception as e:
+        print("[cookies]", e)
 FFMPEG_BEFORE = "-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5 -nostdin"
 FFMPEG_OPTS = "-vn"
 
@@ -297,20 +312,39 @@ async def enqueue(guild: discord.Guild, user, query: str) -> tuple[dict | None, 
     """คืน (track, youtube_bridge, error)"""
     q = query.strip()
     bridge = False
+    has_cookies = bool(YT_COOKIES.strip())
     try:
         if YOUTUBE_RE.search(q):
-            # YouTube เล่นเสียงตรงโดนบล็อกบนโฮสต์ฟรี -> อ่านชื่อคลิปแล้วต่อเสียงผ่าน source หลักแทน
-            vid = yt_id_from_url(q)
-            yt_title, yt_author, yt_thumb = (await youtube_meta(vid)) if vid else (None, None, None)
-            if yt_title:
+            if has_cookies:
+                # มีคุกกี้: ลองเสียง YouTube จริงก่อน พังเมื่อไหร่ค่อย fallback ผ่าน source หลัก
+                try:
+                    info = await extract(q)
+                    if not info.get("url"):
+                        raise ValueError("no audio")
+                except Exception as e:
+                    print("[yt-direct fail, fallback bridge]", str(e)[:200])
+                    info = None
+                if info is None:
+                    vid = yt_id_from_url(q)
+                    yt_title, yt_author, yt_thumb = (await youtube_meta(vid)) if vid else (None, None, None)
+                    if not yt_title:
+                        return None, False, "YouTube บล็อกอยู่ ลองชื่อเพลงเฉยๆ หรือลิงก์ SoundCloud/Spotify แทน"
+                    bridge = True
+                    info = await extract(f"{SEARCH_SOURCE}1:{yt_title} {yt_author or ''}".strip())
+                    info["title"] = yt_title
+                    info["uploader"] = yt_author or info.get("uploader", "")
+                    info["thumbnail"] = yt_thumb or info.get("thumbnail", "")
+            else:
+                # ไม่มีคุกกี้: YouTube เล่นเสียงตรงโดนบล็อกบนโฮสต์ฟรี -> อ่านชื่อคลิปแล้วต่อเสียงผ่าน source หลักแทน
+                vid = yt_id_from_url(q)
+                yt_title, yt_author, yt_thumb = (await youtube_meta(vid)) if vid else (None, None, None)
+                if not yt_title:
+                    return None, False, "อ่านลิงก์ YouTube ไม่ได้ ลองชื่อเพลงเฉยๆ หรือลิงก์ SoundCloud/Spotify แทน"
                 bridge = True
-                play_q = f"{SEARCH_SOURCE}1:{yt_title} {yt_author or ''}".strip()
-                info = await extract(play_q)
+                info = await extract(f"{SEARCH_SOURCE}1:{yt_title} {yt_author or ''}".strip())
                 info["title"] = yt_title
                 info["uploader"] = yt_author or info.get("uploader", "")
                 info["thumbnail"] = yt_thumb or info.get("thumbnail", "")
-            else:
-                info = await extract(q)  # fallback ลองตรง (มัก fail ด้วย 403)
         else:
             if SPOTIFY_RE.search(q):
                 q = spotify_to_search(q)
