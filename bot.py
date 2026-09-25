@@ -232,7 +232,22 @@ def spotify_to_search(query: str) -> str:
 
 
 def extract_blocking(query: str) -> dict:
-    with YoutubeDL(dict(YDL_OPTS)) as ydl:
+    err1 = None
+    try:
+        with YoutubeDL(dict(YDL_OPTS)) as ydl:
+            info = ydl.extract_info(query, download=False)
+            if isinstance(info, dict) and info.get("entries"):
+                info = info["entries"][0]
+            return info
+    except Exception as e:
+        err1 = e
+        # ฟอร์แมต bestaudio ไม่มี (เจอบ่อยกับคลิป YouTube บางคลิป) -> ลอง best อะไรก็ได้ที่มีเสียง
+        if "Requested format is not available" not in str(e):
+            raise
+    opts2 = dict(YDL_OPTS)
+    opts2["format"] = "best[acodec!=none]/best"
+    opts2["extractor_args"] = {"youtube": {"player_client": ["web"]}}
+    with YoutubeDL(opts2) as ydl:
         info = ydl.extract_info(query, download=False)
         if isinstance(info, dict) and info.get("entries"):
             info = info["entries"][0]
