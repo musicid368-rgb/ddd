@@ -65,7 +65,7 @@ if YT_COOKIES.strip():
         with open(COOKIE_PATH, "w", encoding="utf-8") as f:
             f.write(YT_COOKIES)
         YDL_OPTS["cookiefile"] = COOKIE_PATH
-        print("🍪 ใช้ YouTube cookies (โหมดเสียงจริง)")
+        print("🍪 ใช้ YouTube cookies (โหมดเสียงจริง)", flush=True)
     except Exception as e:
         print("[cookies]", e)
 FFMPEG_BEFORE = "-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5 -nostdin"
