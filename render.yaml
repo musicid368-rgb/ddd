@@ -1,0 +1,12 @@
+services:
+  - type: web
+    name: discord-music-bot
+    runtime: docker
+    plan: free
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /
+    envVars:
+      - key: DISCORD_TOKEN
+        sync: false
+      - key: SEARCH_SOURCE
+        value: scsearch
